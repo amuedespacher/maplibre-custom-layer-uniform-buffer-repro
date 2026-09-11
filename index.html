@@ -34,10 +34,32 @@
         display: block;
         margin: 4px 0;
       }
+      #nav {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1;
+        background: #fff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      }
+      #nav a {
+        margin-left: 10px;
+      }
+      #nav a[aria-current] {
+        font-weight: 600;
+        text-decoration: none;
+        color: inherit;
+      }
     </style>
   </head>
   <body>
     <div id="map"></div>
+    <nav id="nav">
+      <a href="./" aria-current="page">MapLibre only</a
+      ><a href="deckgl.html">deck.gl MapLibreOverlay</a>
+    </nav>
     <div id="panel">
       <label>
         <input type="checkbox" id="custom" />

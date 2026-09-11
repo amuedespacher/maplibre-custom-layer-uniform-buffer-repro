@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>
+      deck.gl MapLibreOverlay (interleaved) + MapLibre v6: labels break when a
+      deck.gl layer is visible
+    </title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css"
+    />
+    <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
+    <style>
+      body {
+        margin: 0;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+      #panel {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 1;
+        background: #fff;
+        padding: 10px 12px;
+        border-radius: 6px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      }
+      #panel label {
+        display: block;
+        margin: 4px 0;
+      }
+      #nav {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1;
+        background: #fff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      }
+      #nav a {
+        margin-left: 10px;
+      }
+      #nav a[aria-current] {
+        font-weight: 600;
+        text-decoration: none;
+        color: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <nav id="nav">
+      <a href="./">MapLibre only</a
+      ><a href="deckgl.html" aria-current="page">deck.gl MapLibreOverlay</a>
+    </nav>
+    <div id="panel">
+      <label>
+        <input type="checkbox" id="layer" />
+        Show a deck.gl ScatterplotLayer below the basemap labels
+      </label>
+      <label>
+        <input type="checkbox" id="workaround" />
+        Workaround: restore MapLibre's uniform buffer bindings after deck.gl
+        renders
+      </label>
+    </div>
+
+    <script type="module">
+      import { Map } from "https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.mjs";
+
+      const { MapLibreOverlay, ScatterplotLayer } = deck;
+
+      const map = new Map({
+        container: "map",
+        style:
+          "https://vectortiles.geo.admin.ch/styles/ch.swisstopo.lightbasemap.vt/style.json",
+        center: [8.226667, 46.801111],
+        zoom: 7.5,
+      });
+
+      // --- The bug ---------------------------------------------------------
+      // One ordinary deck.gl layer, interleaved, inserted below the basemap
+      // labels. When it is visible, the labels drawn after it vanish or are
+      // drawn at the wrong size. MapLibre v6 keeps its per-frame uniform block
+      // on uniform binding point 2 and does not rebind it after a custom
+      // layer; luma.gl binds deck.gl's uniform buffers to the same binding
+      // points. See https://github.com/maplibre/maplibre-gl-js/issues/8413
+      const cities = [
+        { name: "Zürich", position: [8.5417, 47.3769], population: 423000 },
+        { name: "Genève", position: [6.1432, 46.2044], population: 204000 },
+        { name: "Basel", position: [7.5886, 47.5596], population: 178000 },
+        { name: "Bern", position: [7.4474, 46.948], population: 134000 },
+        { name: "Lugano", position: [8.9511, 46.0037], population: 62000 },
+      ];
+
+      const firstLabelLayerId = () =>
+        map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
+
+      const makeLayers = () =>
+        layerCheckbox.checked
+          ? [
+              new ScatterplotLayer({
+                id: "cities",
+                data: cities,
+                getPosition: (d) => d.position,
+                getRadius: (d) => Math.sqrt(d.population) / 20,
+                radiusUnits: "pixels",
+                getFillColor: [57, 88, 130, 180],
+                beforeId: firstLabelLayerId(),
+              }),
+            ]
+          : [];
+
+      // --- The workaround --------------------------------------------------
+      // Remember what MapLibre had on the first few uniform binding points
+      // before deck.gl draws, put it back afterwards. Public WebGL calls only.
+      function uniformBufferGuard() {
+        const BINDING_POINTS = 8;
+        let saved = null;
+        return {
+          onBeforeRender: ({ gl }) => {
+            saved = [];
+            for (let i = 0; i < BINDING_POINTS; i++) {
+              saved.push(gl.getIndexedParameter(gl.UNIFORM_BUFFER_BINDING, i));
+            }
+          },
+          onAfterRender: ({ gl }) => {
+            saved?.forEach((buffer, i) =>
+              gl.bindBufferBase(gl.UNIFORM_BUFFER, i, buffer),
+            );
+            saved = null;
+          },
+        };
+      }
+
+      // --- Checkboxes ------------------------------------------------------
+      const layerCheckbox = document.getElementById("layer");
+      const workaroundCheckbox = document.getElementById("workaround");
+
+      const noGuard = { onBeforeRender: () => {}, onAfterRender: () => {} };
+
+      map.once("style.load", () => {
+        const overlay = new MapLibreOverlay({ interleaved: true, layers: [] });
+        map.addControl(overlay);
+
+        layerCheckbox.addEventListener("change", () =>
+          overlay.setProps({ layers: makeLayers() }),
+        );
+        workaroundCheckbox.addEventListener("change", () => {
+          overlay.setProps(
+            workaroundCheckbox.checked ? uniformBufferGuard() : noGuard,
+          );
+          map.triggerRepaint();
+        });
+      });
+    </script>
+  </body>
+</html>
