@@ -1,14 +1,12 @@
 # MapLibre v6: a custom layer that binds a uniform buffer breaks the layers above it
 
-Minimal reproduction, MapLibre GL JS 6.9.0 only, no bundler.
-
 A custom layer binds its own buffer to uniform binding point 2 and draws nothing else.
 MapLibre keeps its per-frame uniform block on that binding point, fills it once per frame
 and does not rebind it after the custom layer, so every layer drawn afterwards reads the
 wrong values. Labels disappear.
 
-| Before | Custom layer on | Workaround on |
-| --- | --- | --- |
+| Before          | Custom layer on   | Workaround on         |
+| --------------- | ----------------- | --------------------- |
 | ![](0-base.png) | ![](1-custom.png) | ![](2-workaround.png) |
 
 The workaround checkbox makes the custom layer restore the previous binding after it
