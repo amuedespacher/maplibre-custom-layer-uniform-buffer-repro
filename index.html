@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>
+      MapLibre v6: custom layer binding a uniform buffer breaks symbol layers
+    </title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.css"
+    />
+    <style>
+      body {
+        margin: 0;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+      #panel {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 1;
+        background: #fff;
+        padding: 10px 12px;
+        border-radius: 6px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+      }
+      #panel label {
+        display: block;
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="panel">
+      <label>
+        <input type="checkbox" id="custom" />
+        Add a custom layer that binds its own uniform buffer
+      </label>
+      <label>
+        <input type="checkbox" id="workaround" />
+        Workaround: the custom layer restores the previous binding
+      </label>
+    </div>
+
+    <script type="module">
+      import { Map } from "https://unpkg.com/maplibre-gl@6.9.0/dist/maplibre-gl.mjs";
+
+      const map = new Map({
+        container: "map",
+        style:
+          "https://vectortiles.geo.admin.ch/styles/ch.swisstopo.lightbasemap.vt/style.json",
+        center: [8.226667, 46.801111],
+        zoom: 7.5,
+      });
+
+      // MapLibre v6 keeps the uniform buffer with its per-frame values on this
+      // binding point. It fills the buffer once per frame and expects it to
+      // stay bound for the whole frame.
+      const BINDING_POINT = 2;
+
+      // BUG REPRO
+      // A custom layer that draws nothing. All it does is bind its own buffer
+      // to the binding point, which is what any WebGL2 renderer with uniform
+      // buffers does. MapLibre does not rebind its buffer afterwards, so all
+      // layers drawn after this one read the wrong values. Labels disappear.
+      const customLayerThatBindsBuffer = {
+        id: "custom-layer-that-binds-buffer",
+        type: "custom",
+        onAdd(map, gl) {
+          this.buffer = gl.createBuffer();
+          gl.bindBuffer(gl.UNIFORM_BUFFER, this.buffer);
+          gl.bufferData(
+            gl.UNIFORM_BUFFER,
+            new Float32Array(64),
+            gl.STATIC_DRAW,
+          );
+          gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+        },
+        onRemove(map, gl) {
+          gl.deleteBuffer(this.buffer);
+        },
+        render(gl) {
+          const bindOwnBuffer = () =>
+            gl.bindBufferBase(gl.UNIFORM_BUFFER, BINDING_POINT, this.buffer);
+
+          if (workaroundCheckbox.checked) {
+            renderThenRestoreBinding(gl, BINDING_POINT, bindOwnBuffer);
+          } else {
+            bindOwnBuffer();
+          }
+        },
+      };
+
+      // WORKAROUND
+      // Remember what MapLibre had on the binding point, render, put it back.
+      function renderThenRestoreBinding(gl, bindingPoint, render) {
+        const previous = gl.getIndexedParameter(
+          gl.UNIFORM_BUFFER_BINDING,
+          bindingPoint,
+        );
+        try {
+          render();
+        } finally {
+          gl.bindBufferBase(gl.UNIFORM_BUFFER, bindingPoint, previous);
+        }
+      }
+
+      const customCheckbox = document.getElementById("custom");
+      const workaroundCheckbox = document.getElementById("workaround");
+
+      // Insert the custom layer below the first label layer, so the labels
+      // are drawn after it.
+      const firstLabelLayerId = () =>
+        map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
+
+      customCheckbox.addEventListener("change", () => {
+        if (customCheckbox.checked) {
+          map.addLayer(customLayerThatBindsBuffer, firstLabelLayerId());
+        } else {
+          map.removeLayer(customLayerThatBindsBuffer.id);
+        }
+      });
+      workaroundCheckbox.addEventListener("change", () => map.triggerRepaint());
+    </script>
+  </body>
+</html>
