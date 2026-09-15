@@ -148,7 +148,7 @@
 
       const noGuard = { onBeforeRender: () => {}, onAfterRender: () => {} };
 
-      map.once("style.load", () => {
+      map.once("load", () => {
         const overlay = new MapLibreOverlay({ interleaved: true, layers: [] });
         map.addControl(overlay);
 
